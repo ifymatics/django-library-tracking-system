@@ -1,14 +1,22 @@
-from rest_framework import viewsets, status
-from rest_framework.response import Response
-from .models import Author, Book, Member, Loan
-from .serializers import AuthorSerializer, BookSerializer, MemberSerializer, LoanSerializer
-from rest_framework.decorators import action
 from django.utils import timezone
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+from .models import Author, Book, Loan, Member
+from .serializers import (
+    AuthorSerializer,
+    BookSerializer,
+    LoanSerializer,
+    MemberSerializer,
+)
 from .tasks import send_loan_notification
+
 
 class AuthorViewSet(viewsets.ModelViewSet):
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
+
 
 class BookViewSet(viewsets.ModelViewSet):
     queryset = Book.objects.all()
@@ -35,7 +43,8 @@ class BookViewSet(viewsets.ModelViewSet):
         book = self.get_object()
         member_id = request.data.get('member_id')
         try:
-            loan = Loan.objects.get(book=book, member__id=member_id, is_returned=False)
+            loan = Loan.objects.get(
+                book=book, member__id=member_id, is_returned=False)
         except Loan.DoesNotExist:
             return Response({'error': 'Active loan does not exist.'}, status=status.HTTP_400_BAD_REQUEST)
         loan.is_returned = True
@@ -45,10 +54,26 @@ class BookViewSet(viewsets.ModelViewSet):
         book.save()
         return Response({'status': 'Book returned successfully.'}, status=status.HTTP_200_OK)
 
+
 class MemberViewSet(viewsets.ModelViewSet):
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
 
+
 class LoanViewSet(viewsets.ModelViewSet):
     queryset = Loan.objects.all()
     serializer_class = LoanSerializer
+
+    @action(detail=True, methods=["post"])
+    def extend_due_date(self, request):
+        try:
+            loan = self.get_object()
+            if (loan.is_returned):
+                return Response({"detail": "Loan has already eenreturned"})
+            if (loan.due_date < timezone.now().date()):
+                return Response({"detail": "Cannot extend an overdue loan"})
+            extension_days = int(request.data.get("additional_days"))
+            loan.due_date += timedelta(days=extension_days)
+            loan.save()
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
